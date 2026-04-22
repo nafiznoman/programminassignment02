@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="description" content="CS4406 Computer Graphics - Assignment #2: Spinning 5-Vertex Polygon" />
+    <title>CS4406 Assignment 2 - Spinning Pentagon</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0,0,0,0.6);
+            padding: 10px 15px;
+            border-radius: 8px;
+            pointer-events: none;
+            z-index: 10;
+            font-size: 14px;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            font-weight: bold;
+        }
+        #controls-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0,0,0,0.6);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            pointer-events: none;
+            font-family: monospace;
+        }
+        @keyframes subtle-glow {
+            0% { text-shadow: 0 0 0px rgba(0,100,255,0); }
+            100% { text-shadow: 0 0 5px rgba(0,100,255,0.5); }
+        }
+        h1 {
+            margin: 0;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h1>🎨 5-Vertex Polygon | 🔵 Blue Surface | 🔄 Spinning on Axes</h1>
+        <div>Regular Pentagon | Rotating around Y and X axes | Three.js WebGL</div>
+    </div>
+    <div id="controls-panel">
+        ⚡ Slow rotation | Vertex count: 5 | Color: #3366FF
+    </div>
+
+    <!-- Include required libraries -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        // ----- Setup Scene, Camera, Renderer (Modern Three.js approach) -----
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Dimensions
+        const WIDTH = window.innerWidth;
+        const HEIGHT = window.innerHeight;
+        const VIEW_ANGLE = 45;
+        const ASPECT = WIDTH / HEIGHT;
+        const NEAR = 0.1;
+        const FAR = 1000;
+
+        // Create renderer with WebGL and set background color to dark gradient-like (dark gray)
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(WIDTH, HEIGHT);
+        renderer.setClearColor(0x111122, 1.0); // Deep space/navy background to contrast with blue polygon
+        document.body.appendChild(renderer.domElement);
+
+        // Create scene
+        const scene = new THREE.Scene();
+        
+        // Add a subtle grid helper and axes helper for reference (optional but adds professional touch)
+        const gridHelper = new THREE.GridHelper(30, 20, 0x88aaff, 0x335588);
+        gridHelper.position.y = -2;
+        scene.add(gridHelper);
+        
+        // Simple axis helper (shorter to avoid clutter)
+        const axesHelper = new THREE.AxesHelper(8);
+        axesHelper.material.transparent = true;
+        axesHelper.material.opacity = 0.25;
+        scene.add(axesHelper);
+        
+        // Create camera
+        const camera = new THREE.PerspectiveCamera(VIEW_ANGLE, ASPECT, NEAR, FAR);
+        camera.position.set(0, 2, 12);
+        camera.lookAt(0, 0, 0);
+        
+        // Add orbit controls for interactivity (allows user to view from different angles)
+        // but we still have auto-rotation of the polygon itself. Controls won't interfere with object rotation.
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;      // smooth inertia
+        controls.dampingFactor = 0.05;
+        controls.autoRotate = false;
+        controls.enableZoom = true;
+        controls.enablePan = true;
+        controls.target.set(0, 0, 0);
+        
+        // ----- Lighting Setup (to make the blue surface pop and show shading) -----
+        // Ambient light: soft white light to illuminate evenly
+        const ambientLight = new THREE.AmbientLight(0x404060);
+        scene.add(ambientLight);
+        
+        // Main directional light from top-left-front
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        directionalLight.position.set(5, 10, 7);
+        directionalLight.castShadow = false; // lightweight
+        scene.add(directionalLight);
+        
+        // Fill light from the right-back to reduce harshness
+        const fillLight = new THREE.PointLight(0x4466cc, 0.4);
+        fillLight.position.set(-3, 2, 4);
+        scene.add(fillLight);
+        
+        // Back rim light to highlight edges
+        const rimLight = new THREE.PointLight(0xffaa66, 0.3);
+        rimLight.position.set(0, 1, -5);
+        scene.add(rimLight);
+        
+        // Optional: a subtle blue fill from below
+        const underLight = new THREE.PointLight(0x2266aa, 0.25);
+        underLight.position.set(0, -3, 0);
+        scene.add(underLight);
+        
+        // ----- Create the Polygon with 5 Vertices (Regular Pentagon) -----
+        // We'll compute the 5 vertices on a circle of radius 2.5 for a nice shape.
+        // The polygon will be a flat shape (on the XZ plane or XY? Usually we want it facing camera initially.
+        // To make it spin nicely, we'll create a flat shape on the XZ plane but rotate it slightly? No, 
+        // standard approach: vertices in XY plane (Z=0) so that rotation around X and Y axes creates nice 3D spin.
+        // Using XY plane means the polygon lies flat like a 2D shape in 3D space, then rotating around X and Y 
+        // will make it tumble. For better visual, we'll place vertices in XY plane (Z=0). 
+        
+        const radius = 2.8;      // size of polygon
+        const vertexCount = 5;
+        const vertices = [];
+        
+        // Compute angles for a regular pentagon (starting at -90° to have one vertex pointing up? 
+        // Starting angle offset to make orientation symmetric: typically first vertex at top for pentagon 
+        // but any orientation works. We'll start at -18° to have a flat top? Actually regular pentagon,
+        // to look good, we set first vertex at angle -PI/2 (top) gives point up. But for visual appeal, 
+        // let's start at -PI/2 so that one vertex points upward.
+        const startAngle = -Math.PI / 2; // point upward
+        
+        for (let i = 0; i < vertexCount; i++) {
+            const angle = startAngle + (i * 2 * Math.PI / vertexCount);
+            const x = radius * Math.cos(angle);
+            const y = radius * Math.sin(angle);
+            const z = 0;  // flat polygon on XY plane
+            vertices.push(new THREE.Vector3(x, y, z));
+        }
+        
+        // To create a filled polygon using BufferGeometry, we need to triangulate the convex polygon.
+        // Since it's a convex pentagon, we can create triangles using vertex indices (0,1,2), (0,2,3), (0,3,4).
+        // This is efficient and works for any convex polygon.
+        const indices = [
+            0, 1, 2,  // first triangle
+            0, 2, 3,  // second triangle
+            0, 3, 4   // third triangle
+        ];
+        
+        // Build geometry
+        const geometry = new THREE.BufferGeometry();
+        
+        // Create position array
+        const positions = [];
+        vertices.forEach(v => {
+            positions.push(v.x, v.y, v.z);
+        });
+        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+        geometry.setIndex(indices);
+        
+        // Compute normals automatically for proper lighting (to make the surface respond to lights)
+        geometry.computeVertexNormals();  // helps with shading
+        
+        // Create a material with blue color (hex #3366FF or 0x3366ff) with some shininess
+        // The requirement: "red or blue surface" - we choose blue.
+        const material = new THREE.MeshStandardMaterial({
+            color: 0x3366ff,
+            side: THREE.DoubleSide,      // Show both sides when spinning, but front is enough. DoubleSide ensures visibility when rotated.
+            roughness: 0.4,
+            metalness: 0.2,
+            emissive: 0x001133,
+            emissiveIntensity: 0.15,
+            flatShading: false
+        });
+        
+        // Create the mesh (polygon)
+        const polygon = new THREE.Mesh(geometry, material);
+        
+        // Add a subtle wireframe outline to enhance the edges of the pentagon (optional, but looks professional)
+        // This also emphasizes the 5 vertices and edges.
+        const wireframeMaterial = new THREE.MeshBasicMaterial({
+            color: 0xaaccff,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.35
+        });
+        const wireframePolygon = new THREE.Mesh(geometry, wireframeMaterial);
+        polygon.add(wireframePolygon);  // attach wireframe as child so it spins together
+        
+        // Also add small spheres at each vertex to highlight the 5 vertices (makes vertex count clear)
+        // This directly addresses the requirement "composed of 5 vertices" by visually marking them.
+        const vertexGroup = new THREE.Group();
+        const sphereMaterial = new THREE.MeshStandardMaterial({ color: 0xffaa55, emissive: 0x442200, roughness: 0.3 });
+        
+        vertices.forEach(v => {
+            const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 16), sphereMaterial);
+            sphere.position.copy(v);
+            vertexGroup.add(sphere);
+        });
+        
+        // Add the vertex markers to the polygon so they rotate with it
+        polygon.add(vertexGroup);
+        
+        // Optional: Add a thin line loop around the pentagon to emphasize edges (using EdgesGeometry or LineLoop)
+        // Create a LineLoop from the vertices to show the boundary perfectly.
+        const points = vertices.concat([vertices[0]]); // close the loop
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0x88bbff, linewidth: 2 }); // linewidth not supported everywhere, but color works
+        const borderLoop = new THREE.LineLoop(lineGeometry, lineMaterial);
+        polygon.add(borderLoop);
+        
+        scene.add(polygon);
+        
+        // Add a faint starfield or particle effect for ambiance? Not required, but adds polish.
+        // Simple star particles in background.
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 800;
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            starPositions[i*3] = (Math.random() - 0.5) * 200;
+            starPositions[i*3+1] = (Math.random() - 0.5) * 100;
+            starPositions[i*3+2] = (Math.random() - 0.5) * 80 - 40;
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.6 });
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+        
+        // Optional: Simple floating particles around the polygon (cosmetic)
+        const particleCount = 300;
+        const particleGeo = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        for (let i = 0; i < particleCount; i++) {
+            // random positions in a sphere around origin
+            const rad = 3.5 + Math.random() * 1.5;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            particlePositions[i*3] = rad * Math.sin(phi) * Math.cos(theta);
+            particlePositions[i*3+1] = rad * Math.sin(phi) * Math.sin(theta);
+            particlePositions[i*3+2] = rad * Math.cos(phi);
+        }
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        const particleMat = new THREE.PointsMaterial({ color: 0x66aaff, size: 0.05, transparent: true, opacity: 0.4 });
+        const particles = new THREE.Points(particleGeo, particleMat);
+        scene.add(particles);
+        
+        // ---- Animation Loop: Spinning the polygon slowly on its axes ----
+        // The polygon will rotate around X axis and Y axis simultaneously at different speeds
+        // to create a pleasant "spinning on its axes" effect.
+        // Requirement: "spin slowly on its axes"
+        // We'll rotate both axes with small incremental angles per frame.
+        
+        let time = 0;
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Increment time delta for consistent rotation speed (frame-rate independent? use delta? 
+            // Simpler: use constant small increments. Since typical 60fps, rotate per frame.
+            // Speed: rotate around Y axis at 0.008 rad per frame (~0.5 rad/sec at 60fps = ~28 deg/sec)
+            // and X axis at 0.005 rad per frame. This gives slow, elegant tumbling motion.
+            // To make it spin slowly but noticeably, we'll set:
+            polygon.rotation.y += 0.007;
+            polygon.rotation.x += 0.004;
+            polygon.rotation.z += 0.002;   // slight Z rotation adds more dynamic feel, still "on its axes"
+            
+            // Also rotate the stars and particles very slowly to give sense of motion, but not necessary
+            stars.rotation.y += 0.0005;
+            stars.rotation.x += 0.0003;
+            particles.rotation.y -= 0.001;
+            particles.rotation.x += 0.0008;
+            
+            // Update orbit controls if user interacts
+            controls.update(); // only needed if damping or autoRotate, but we call it to refresh
+            
+            // Render scene
+            renderer.render(scene, camera);
+        }
+        
+        // Start the animation
+        animate();
+        
+        // Handle window resize gracefully
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // Small console log to confirm successful creation
+        console.log('Polygon with 5 vertices created. Blue surface. Spinning on axes.');
+        
+        // Additional: Add a subtle reflection ring or floor reflection? No need but a nice circular plane? Not necessary.
+        // We'll add a faint circular glow beneath the polygon to accentuate (optional).
+        const circleGeometry = new THREE.RingGeometry(2.9, 3.5, 32);
+        const circleMaterial = new THREE.MeshStandardMaterial({
+            color: 0x2266aa,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.2,
+            emissive: 0x004466
+        });
+        const haloRing = new THREE.Mesh(circleGeometry, circleMaterial);
+        haloRing.rotation.x = -Math.PI / 2;
+        haloRing.position.y = -1.5;
+        scene.add(haloRing);
+        
+        // For extra clarity, we add a label with vertex count using CSS? Already in info panel.
+    </script>
+</body>
+</html>
